@@ -1,12 +1,14 @@
-name: unit test
+name: unit tests
 
-on: [push]
+on: [push, pull_request]
 
 jobs:
   build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v3
+        with:
+          fetch-depth: 1
 
       - name: Set up Go
         uses: actions/setup-go@v3
@@ -15,3 +17,11 @@ jobs:
 
       - name: Test
         run: make test
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@v3
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.out
+          flags: unittests
+          verbose: true
