@@ -11,8 +11,9 @@ const (
 	_memTableFilenamePrefix = ".memtable"
 	_LogFile                = ".log"
 	_LogLine                = "%s|%v\n"
-	_SegmentFile            = ".%s.segment"
-	_IndexFile              = ".%s.index"
+	_TempLogFileSuffix      = ".temp"
+	// _SegmentFile            = ".%s.segment"
+	// _IndexFile              = ".%s.index"
 
 	_unlimited            uint = 0
 	_defaultSizeThreshold uint = 4 * 1024 * 1024 * 1024 // 4 MiB
@@ -22,6 +23,7 @@ type memTableOptions struct {
 	namePrefix    string
 	keyThreshold  uint
 	sizeThreshold uint
+	useTempFile   bool // whether use temp file to rebuild the memtable as well
 }
 
 type Option interface {
@@ -43,12 +45,18 @@ type sizeThresholdOption uint
 func (o sizeThresholdOption) apply(m *memTableOptions) { m.sizeThreshold = uint(o) }
 func WithSizeThreshold(s uint) Option                  { return sizeThresholdOption(s) }
 
+type useTempFileOption bool
+
+func (o useTempFileOption) apply(m *memTableOptions) { m.useTempFile = bool(o) }
+func WithUseTempFile(b bool) Option                  { return useTempFileOption(b) }
+
 type MemTable struct {
 	f             *os.File
 	m             map[string]string
 	keyThreshold  uint
 	sizeThreshold uint
 	size          uint
+	useTempFile   bool
 }
 
 func NewMemTable(opt ...Option) (*MemTable, error) {
@@ -56,6 +64,7 @@ func NewMemTable(opt ...Option) (*MemTable, error) {
 		namePrefix:    _memTableFilenamePrefix,
 		keyThreshold:  _unlimited,
 		sizeThreshold: _unlimited,
+		useTempFile:   true,
 	}
 	for _, opt := range opt {
 		opt.apply(&options)
@@ -64,7 +73,16 @@ func NewMemTable(opt ...Option) (*MemTable, error) {
 		options.sizeThreshold = _defaultSizeThreshold
 	}
 
-	m, n, err := rebuildMemTable(options.namePrefix + _LogFile)
+	var tempN uint
+	m := make(map[string]string)
+	if options.useTempFile {
+		n, err := rebuildMemTable(m, options.namePrefix+_LogFile+_TempLogFileSuffix)
+		if err != nil {
+			return nil, err
+		}
+		tempN += n
+	}
+	n, err := rebuildMemTable(m, options.namePrefix+_LogFile)
 	if err != nil {
 		return nil, err
 	}
@@ -79,7 +97,8 @@ func NewMemTable(opt ...Option) (*MemTable, error) {
 		f:             f,
 		keyThreshold:  options.keyThreshold,
 		sizeThreshold: options.sizeThreshold,
-		size:          n,
+		size:          n + tempN,
+		useTempFile:   options.useTempFile,
 	}
 	return mt, nil
 }
@@ -110,6 +129,10 @@ func (m MemTable) Get(k string) (string, error) {
 func (m MemTable) IsFull() bool {
 	return (m.keyThreshold != _unlimited && uint(len(m.m)) >= m.keyThreshold) ||
 		(m.sizeThreshold != _unlimited && m.size >= m.sizeThreshold)
+}
+
+func (m MemTable) Rename() error {
+	return os.Rename(m.f.Name(), m.f.Name()+_TempLogFileSuffix)
 }
 
 // func (m MemTable) Serialize() ([]byte, []byte) {
@@ -150,21 +173,19 @@ func (m MemTable) IsFull() bool {
 // 	return nil
 // }
 
-func rebuildMemTable(filename string) (map[string]string, uint, error) {
-	m := make(map[string]string)
-
-	_, err := os.Stat(filename)
+func rebuildMemTable(m map[string]string, fname string) (uint, error) {
+	_, err := os.Stat(fname)
 	if err != nil && !os.IsNotExist(err) /* something went wrong */ {
-		return nil, 0, err
+		return 0, err
 	} else if os.IsNotExist(err) {
 		// file does not exist, return empty map
-		return m, 0, nil
+		return 0, nil
 	}
 
 	// then, means file exists
-	rfd, err := os.Open(filename)
+	rfd, err := os.Open(fname)
 	if err != nil {
-		return nil, 0, err
+		return 0, err
 	}
 
 	// rebuild the memtable from the log file.
@@ -176,5 +197,5 @@ func rebuildMemTable(filename string) (map[string]string, uint, error) {
 		parts := strings.Split(string(b), "|")
 		m[parts[0]] = parts[1]
 	}
-	return m, n, nil
+	return n, nil
 }

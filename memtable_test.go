@@ -71,3 +71,38 @@ func Test_MemTable_IsFull(t *testing.T) {
 	require.NoError(t, mt.Set("d", strings.Repeat("1", 20)))
 	require.True(t, mt.IsFull(), "current size: %v", mt.size)
 }
+
+func Test_MemTable_Rename(t *testing.T) {
+	mt, err := NewMemTable(
+		WithNamePrefix(t.Name()),
+	)
+	require.NoError(t, err)
+	require.NoError(t, mt.Set("a", "1"))
+	require.NoError(t, mt.Set("b", "2"))
+	require.NoError(t, mt.Set("c", "3"))
+	require.NoError(t, mt.Rename())
+	require.NoError(t, mt.Close())
+
+	// reopen again without loading temp file
+	mt, err = NewMemTable(
+		WithNamePrefix(t.Name()),
+		WithUseTempFile(false),
+	)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{}, mt.m)
+	require.NoError(t, mt.Set("c", "4")) // will overwrite "c" to "3"
+	require.Equal(t, map[string]string{"c": "4"}, mt.m)
+	require.NoError(t, mt.Close())
+
+	// reopen again with loading temp file
+	mt, err = NewMemTable(
+		WithNamePrefix(t.Name()),
+		WithUseTempFile(true),
+	)
+	require.NoError(t, err)
+	require.Equal(t, map[string]string{
+		"a": "1",
+		"b": "2",
+		"c": "4", // "c" should not equal to "3"
+	}, mt.m)
+}
