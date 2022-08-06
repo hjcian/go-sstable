@@ -13,67 +13,58 @@ const (
 	_LogLine                = "%s|%v\n"
 	_SegmentFile            = ".%s.segment"
 	_IndexFile              = ".%s.index"
+
+	_unlimited            uint = 0
+	_defaultSizeThreshold uint = 4 * 1024 * 1024 * 1024 // 4 MiB
 )
 
 type memTableOptions struct {
-	namePrefix string
+	namePrefix    string
+	keyThreshold  uint
+	sizeThreshold uint
 }
 
 type Option interface {
 	apply(m *memTableOptions)
 }
 
-type namePrefix string
+type namePrefixOption string
 
-func (o namePrefix) apply(m *memTableOptions) {
-	m.namePrefix = string(o)
-}
-func WithNamePrefix(prefix string) Option {
-	return namePrefix(prefix)
-}
+func (o namePrefixOption) apply(m *memTableOptions) { m.namePrefix = string(o) }
+func WithNamePrefix(n string) Option                { return namePrefixOption(n) }
+
+type keyThresholdOption uint
+
+func (o keyThresholdOption) apply(m *memTableOptions) { m.keyThreshold = uint(o) }
+func WithKeyThreshold(k uint) Option                  { return keyThresholdOption(k) }
+
+type sizeThresholdOption uint
+
+func (o sizeThresholdOption) apply(m *memTableOptions) { m.sizeThreshold = uint(o) }
+func WithSizeThreshold(s uint) Option                  { return sizeThresholdOption(s) }
 
 type MemTable struct {
-	m map[string]string
-	f *os.File
-}
-
-func rebuildMemTable(filename string) (map[string]string, error) {
-	m := make(map[string]string)
-
-	_, err := os.Stat(filename)
-	if err != nil && !os.IsNotExist(err) /* something went wrong */ {
-		return nil, err
-	} else if os.IsNotExist(err) {
-		// file does not exist, return empty map
-		return m, nil
-	}
-
-	// then, means file exists
-	rfd, err := os.Open(filename)
-	if err != nil {
-		return nil, err
-	}
-
-	// rebuild the memtable from the log file.
-	scanner := bufio.NewScanner(rfd)
-	for scanner.Scan() {
-		line := scanner.Text()
-		parts := strings.Split(line, "|")
-		m[parts[0]] = parts[1]
-	}
-
-	return m, nil
+	f             *os.File
+	m             map[string]string
+	keyThreshold  uint
+	sizeThreshold uint
+	size          uint
 }
 
 func NewMemTable(opt ...Option) (*MemTable, error) {
 	options := memTableOptions{
-		namePrefix: _memTableFilenamePrefix,
+		namePrefix:    _memTableFilenamePrefix,
+		keyThreshold:  _unlimited,
+		sizeThreshold: _unlimited,
 	}
 	for _, opt := range opt {
 		opt.apply(&options)
 	}
+	if options.keyThreshold == _unlimited && options.sizeThreshold == _unlimited {
+		options.sizeThreshold = _defaultSizeThreshold
+	}
 
-	m, err := rebuildMemTable(options.namePrefix + _LogFile)
+	m, n, err := rebuildMemTable(options.namePrefix + _LogFile)
 	if err != nil {
 		return nil, err
 	}
@@ -84,8 +75,11 @@ func NewMemTable(opt ...Option) (*MemTable, error) {
 	}
 
 	mt := &MemTable{
-		m: m,
-		f: f,
+		m:             m,
+		f:             f,
+		keyThreshold:  options.keyThreshold,
+		sizeThreshold: options.sizeThreshold,
+		size:          n,
 	}
 	return mt, nil
 }
@@ -94,12 +88,13 @@ func (m MemTable) Close() error {
 	return m.f.Close()
 }
 
-func (m MemTable) Set(k, v string) error {
-	_, err := m.f.Write([]byte(fmt.Sprintf(_LogLine, k, v)))
+func (m *MemTable) Set(k, v string) error {
+	n, err := m.f.Write([]byte(fmt.Sprintf(_LogLine, k, v)))
 	if err != nil {
 		return nil
 	}
 
+	m.size += uint(n)
 	m.m[k] = v
 	return nil
 }
@@ -110,6 +105,11 @@ func (m MemTable) Get(k string) (string, error) {
 		return "", fmt.Errorf("key %s not found", k)
 	}
 	return v, nil
+}
+
+func (m MemTable) IsFull() bool {
+	return (m.keyThreshold != _unlimited && uint(len(m.m)) >= m.keyThreshold) ||
+		(m.sizeThreshold != _unlimited && m.size >= m.sizeThreshold)
 }
 
 // func (m MemTable) Serialize() ([]byte, []byte) {
@@ -149,3 +149,32 @@ func (m MemTable) Get(k string) (string, error) {
 // 	}
 // 	return nil
 // }
+
+func rebuildMemTable(filename string) (map[string]string, uint, error) {
+	m := make(map[string]string)
+
+	_, err := os.Stat(filename)
+	if err != nil && !os.IsNotExist(err) /* something went wrong */ {
+		return nil, 0, err
+	} else if os.IsNotExist(err) {
+		// file does not exist, return empty map
+		return m, 0, nil
+	}
+
+	// then, means file exists
+	rfd, err := os.Open(filename)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// rebuild the memtable from the log file.
+	var n uint
+	scanner := bufio.NewScanner(rfd)
+	for scanner.Scan() {
+		b := scanner.Bytes()
+		n += uint(len(b)) + 1 // add new line character
+		parts := strings.Split(string(b), "|")
+		m[parts[0]] = parts[1]
+	}
+	return m, n, nil
+}

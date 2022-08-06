@@ -1,6 +1,7 @@
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -40,4 +41,33 @@ func Test_MemTable(t *testing.T) {
 		"b": "123",
 		"c": "456",
 	}, mt.m)
+}
+
+func Test_MemTable_IsFull(t *testing.T) {
+	mt, err := NewMemTable(
+		WithNamePrefix(t.Name()),
+		WithKeyThreshold(3),
+	)
+	require.NoError(t, err)
+	require.False(t, mt.IsFull())
+
+	require.NoError(t, mt.Set("a", "1"))
+	require.False(t, mt.IsFull())
+
+	require.NoError(t, mt.Set("b", "2"))
+	require.False(t, mt.IsFull())
+
+	require.NoError(t, mt.Set("c", "3"))
+	require.True(t, mt.IsFull())
+	require.NoError(t, mt.Close())
+
+	mt, err = NewMemTable(
+		WithNamePrefix(t.Name()),
+		WithSizeThreshold(20), // 20 bytes
+	)
+	require.NoError(t, err)
+	require.False(t, mt.IsFull())
+
+	require.NoError(t, mt.Set("d", strings.Repeat("1", 20)))
+	require.True(t, mt.IsFull(), "current size: %v", mt.size)
 }
