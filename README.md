@@ -1,5 +1,7 @@
 # go-sstable
 
+[![codecov](https://codecov.io/gh/hjcian/go-sstable/branch/main/graph/badge.svg?token=W80KS02GV8)](https://codecov.io/gh/hjcian/go-sstable)
+
 # Goal
 
 This is my learning journey of trying to implement the philosophy of [SSTable](https://www.igvita.com/2012/02/06/sstable-and-log-structured-storage-leveldb/) using [Go](https://go.dev/).
