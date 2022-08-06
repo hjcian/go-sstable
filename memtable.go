@@ -8,24 +8,33 @@ import (
 )
 
 const (
-	_LogFile     = ".memtable.log"
-	_LogLine     = "%s|%v\n"
-	_SegmentFile = ".memtable.%s.segment"
-	_IndexFile   = ".memtable.%s.index"
+	_memTableFilenamePrefix = ".memtable"
+	_LogFile                = ".log"
+	_LogLine                = "%s|%v\n"
+	_SegmentFile            = ".%s.segment"
+	_IndexFile              = ".%s.index"
 )
 
-// Write --->
-// Open, restore
+type memTableOptions struct {
+	namePrefix string
+}
 
-// TODO: add log file for avoid data loss when app crashed.
+type Option interface {
+	apply(m *memTableOptions)
+}
+
+type namePrefix string
+
+func (o namePrefix) apply(m *memTableOptions) {
+	m.namePrefix = string(o)
+}
+func WithNamePrefix(prefix string) Option {
+	return namePrefix(prefix)
+}
+
 type MemTable struct {
 	m map[string]string
 	f *os.File
-}
-
-func parseLogLine(line string) (string, string) {
-	parts := strings.Split(line, "|")
-	return parts[0], parts[1]
 }
 
 func rebuildMemTable(filename string) (map[string]string, error) {
@@ -49,20 +58,27 @@ func rebuildMemTable(filename string) (map[string]string, error) {
 	scanner := bufio.NewScanner(rfd)
 	for scanner.Scan() {
 		line := scanner.Text()
-		k, v := parseLogLine(line)
-		m[k] = v
+		parts := strings.Split(line, "|")
+		m[parts[0]] = parts[1]
 	}
 
 	return m, nil
 }
 
-func NewMemTable() (*MemTable, error) {
-	m, err := rebuildMemTable(_LogFile)
+func NewMemTable(opt ...Option) (*MemTable, error) {
+	options := memTableOptions{
+		namePrefix: _memTableFilenamePrefix,
+	}
+	for _, opt := range opt {
+		opt.apply(&options)
+	}
+
+	m, err := rebuildMemTable(options.namePrefix + _LogFile)
 	if err != nil {
 		return nil, err
 	}
 
-	f, err := os.OpenFile(_LogFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
+	f, err := os.OpenFile(options.namePrefix+_LogFile, os.O_WRONLY|os.O_CREATE|os.O_APPEND, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -74,6 +90,10 @@ func NewMemTable() (*MemTable, error) {
 	return mt, nil
 }
 
+func (m MemTable) Close() error {
+	return m.f.Close()
+}
+
 func (m MemTable) Set(k, v string) error {
 	_, err := m.f.Write([]byte(fmt.Sprintf(_LogLine, k, v)))
 	if err != nil {
@@ -82,6 +102,14 @@ func (m MemTable) Set(k, v string) error {
 
 	m.m[k] = v
 	return nil
+}
+
+func (m MemTable) Get(k string) (string, error) {
+	v, ok := m.m[k]
+	if !ok {
+		return "", fmt.Errorf("key %s not found", k)
+	}
+	return v, nil
 }
 
 // func (m MemTable) Serialize() ([]byte, []byte) {
