@@ -13,6 +13,8 @@ The beginning of this journey is refer to the chapter of "Data Structures That P
 - [資料密集型應用系統設計 (translate to Mandarin Chinese)](https://www.tenlong.com.tw/products/9789865028350)
 - [Designing Data-Intensive Applications](https://www.oreilly.com/library/view/designing-data-intensive-applications/9781491903063/)
 - [SSTable and Log Structured Storage: LevelDB](https://www.igvita.com/2012/02/06/sstable-and-log-structured-storage-leveldb/)
+- [Starting from Zero: Build an LSM Database with 500 Lines of Code](https://www.alibabacloud.com/blog/starting-from-zero-build-an-lsm-database-with-500-lines-of-code_598114)
+
 
 # Development Notes
 - [Q: How to maintain the sparse index in a LSM-tree?](https://stackoverflow.com/questions/69103575/how-to-maintain-the-sparse-index-in-a-lsm-tree)
